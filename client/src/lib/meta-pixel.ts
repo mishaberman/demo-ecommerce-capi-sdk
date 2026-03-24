@@ -1,23 +1,26 @@
 /**
- * Meta Pixel & Conversions API — Meta Business SDK Style Implementation
+ * Meta Pixel & Conversions API — Business SDK Style via Server-Side Proxy
  * 
- * CAPI METHOD: Simulated Meta Business SDK (facebook-nodejs-business-sdk pattern)
+ * CAPI METHOD: Server-Side Proxy (Business SDK-style class construction)
  *   Uses class-based ServerEvent, UserData, CustomData construction
- *   Mimics the SDK's EventRequest pattern but runs client-side
+ *   mimicking the facebook-nodejs-business-sdk pattern.
+ *   Events are sent to a backend proxy server instead of directly to Graph API.
+ *   Access token is stored server-side only.
  * 
  * PIXEL STATUS: Good — advanced matching, noscript, all events
  * 
  * STRENGTHS:
- * - EMQ: GOOD — sends em, ph, fn, ln, fbc, fbp, client_ua, external_id
- * - Impl Quality: GOOD — SDK-style class-based, proper hashing + normalization
+ * - EMQ: GOOD — sends em, ph, fn, ln, fbc, fbp, client_ua
+ * - Impl Quality: GOOD — SDK-style class-based, proper structure
  * - Param Completeness: GOOD — most custom_data params present
  * - Data Freshness: GOOD — real-time
+ * - Security: GOOD — access token stored server-side only
  * 
- * WEAKNESSES:
+ * WEAKNESSES (intentional for demo):
  * - Dedup: NONE — NO event_id on pixel OR CAPI calls! Double-counting risk!
- * - Event Coverage: GOOD but missing Search event server-side
+ * - Event Coverage: GOOD but Search event only fires pixel, not CAPI
  * - Privacy/DPO: FAIR — data_processing_options present but always empty array []
- * - Missing external_id, test_event_code, EventRequestAsync
+ * - Missing external_id, test_event_code
  */
 
 declare global {
@@ -28,23 +31,26 @@ declare global {
 }
 
 const PIXEL_ID = '1684145446350033';
-const ACCESS_TOKEN = 'EAAEDq1LHx1gBRPAEq5cUOKS5JrrvMif65SN8ysCUrX5t0SUZB3ETInM6Pt71VHea0bowwEehinD0oZAeSmIPWivziiVu0FuEIcsmgvT3fiqZADKQDiFgKdsugONbJXELgvLuQxHT0krELKt3DPhm0EyUa44iXu8uaZBZBddgVmEnFdNMBmsWmYJdOT17DTitYKwZDZD';
+
+// CAPI Backend Proxy URL — access token is stored server-side only
+const CAPI_PROXY_URL = 'https://demoshop-fpx9kus8.manus.space/api/capi/event';
 
 // ============================================================
-// Business SDK-style Classes (simulated client-side)
+// Business SDK-style Classes (sent to server-side proxy)
+// These mirror the facebook-nodejs-business-sdk API surface
+// but serialize to JSON for the proxy endpoint.
 // ============================================================
 
 class UserData {
   private data: Record<string, unknown> = {};
 
-  setEmail(email: string) { this.data.em = [email]; return this; }
-  setPhone(phone: string) { this.data.ph = [phone]; return this; }
-  setFirstName(fn: string) { this.data.fn = [fn]; return this; }
-  setLastName(ln: string) { this.data.ln = [ln]; return this; }
-  setCity(city: string) { this.data.ct = [city]; return this; }
-  setState(state: string) { this.data.st = [state]; return this; }
-  setZip(zip: string) { this.data.zp = [zip]; return this; }
-  setClientUserAgent(ua: string) { this.data.client_user_agent = ua; return this; }
+  setEmail(email: string) { this.data.em = email; return this; }
+  setPhone(phone: string) { this.data.ph = phone; return this; }
+  setFirstName(fn: string) { this.data.fn = fn; return this; }
+  setLastName(ln: string) { this.data.ln = ln; return this; }
+  setCity(city: string) { this.data.ct = city; return this; }
+  setState(state: string) { this.data.st = state; return this; }
+  setZip(zip: string) { this.data.zp = zip; return this; }
   setFbc(fbc: string) { this.data.fbc = fbc; return this; }
   setFbp(fbp: string) { this.data.fbp = fbp; return this; }
   // GAP: Missing setExternalId() — should include for cross-device matching
@@ -84,38 +90,38 @@ class ServerEvent {
   toJSON() { return this.data; }
 }
 
+/**
+ * EventRequest — sends to server-side proxy instead of Graph API directly.
+ * The server handles:
+ * - SHA-256 hashing of PII (em, ph, fn, ln, ct, st, zp)
+ * - IP address extraction from request headers
+ * - User agent injection
+ * - Secure access token storage
+ * - Forwarding to Meta Graph API
+ */
 class EventRequest {
-  private pixelId: string;
   private events: ServerEvent[] = [];
-  private accessToken: string;
-
-  constructor(accessToken: string, pixelId: string) {
-    this.accessToken = accessToken;
-    this.pixelId = pixelId;
-  }
 
   setEvents(events: ServerEvent[]) { this.events = events; return this; }
 
   async execute(): Promise<unknown> {
-    const payload = {
-      data: this.events.map(e => e.toJSON()),
-      access_token: this.accessToken,
-    };
-
-    const endpoint = `https://graph.facebook.com/v18.0/${this.pixelId}/events`;
-
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json();
-      console.log(`[CAPI SDK] EventRequest response:`, result);
-      return result;
-    } catch (err) {
-      console.error(`[CAPI SDK] EventRequest failed:`, err);
-      throw err;
+    // Send each event to the server-side proxy
+    // The proxy wraps it in the Graph API format with access_token
+    for (const event of this.events) {
+      const payload = event.toJSON();
+      try {
+        const response = await fetch(CAPI_PROXY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        console.log(`[CAPI SDK Proxy] EventRequest response:`, result);
+        return result;
+      } catch (err) {
+        console.error(`[CAPI SDK Proxy] EventRequest failed:`, err);
+        throw err;
+      }
     }
   }
 }
@@ -123,14 +129,6 @@ class EventRequest {
 // ============================================================
 // HELPERS
 // ============================================================
-
-async function hashValue(value: string): Promise<string> {
-  const normalized = value.trim().toLowerCase();
-  const encoder = new TextEncoder();
-  const data = encoder.encode(normalized);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 function getCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -162,25 +160,27 @@ function trackPixelEvent(eventName: string, params?: Record<string, unknown>) {
 }
 
 // ============================================================
-// CAPI — Business SDK Style (NO event_id!)
+// CAPI — Business SDK Style via Server-Side Proxy (NO event_id!)
+// Server handles hashing — frontend sends raw PII
 // ============================================================
 
 async function sendCAPIEvent(eventName: string, customData: CustomData) {
-  const userData = new UserData()
-    .setClientUserAgent(navigator.userAgent);
+  const userData = new UserData();
 
+  // fbc/fbp for identity matching
   const fbc = getCookie('_fbc');
   const fbp = getCookie('_fbp');
   if (fbc) userData.setFbc(fbc);
   if (fbp) userData.setFbp(fbp);
 
-  if (storedUserData.em) userData.setEmail(await hashValue(storedUserData.em));
-  if (storedUserData.ph) userData.setPhone(await hashValue(storedUserData.ph));
-  if (storedUserData.fn) userData.setFirstName(await hashValue(storedUserData.fn));
-  if (storedUserData.ln) userData.setLastName(await hashValue(storedUserData.ln));
-  if (storedUserData.ct) userData.setCity(await hashValue(storedUserData.ct));
-  if (storedUserData.st) userData.setState(await hashValue(storedUserData.st));
-  if (storedUserData.zp) userData.setZip(await hashValue(storedUserData.zp));
+  // Send raw PII — server will hash these
+  if (storedUserData.em) userData.setEmail(storedUserData.em);
+  if (storedUserData.ph) userData.setPhone(storedUserData.ph);
+  if (storedUserData.fn) userData.setFirstName(storedUserData.fn);
+  if (storedUserData.ln) userData.setLastName(storedUserData.ln);
+  if (storedUserData.ct) userData.setCity(storedUserData.ct);
+  if (storedUserData.st) userData.setState(storedUserData.st);
+  if (storedUserData.zp) userData.setZip(storedUserData.zp);
 
   const serverEvent = new ServerEvent()
     .setEventName(eventName)
@@ -192,7 +192,7 @@ async function sendCAPIEvent(eventName: string, customData: CustomData) {
     .setCustomData(customData)
     .setDataProcessingOptions([]); // WEAKNESS: Empty array — should be ['LDU'] for US users
 
-  const request = new EventRequest(ACCESS_TOKEN, PIXEL_ID)
+  const request = new EventRequest()
     .setEvents([serverEvent]);
 
   await request.execute();
@@ -226,7 +226,6 @@ export function trackPurchase(value: number, currency: string, contentIds?: stri
   const cd = new CustomData().setValue(value).setCurrency(currency).setContentType('product');
   if (contentIds) cd.setContentIds(contentIds);
   if (numItems) cd.setNumItems(numItems);
-  // GAP: Missing order_id for purchase dedup
   sendCAPIEvent('Purchase', cd);
 }
 
@@ -252,5 +251,5 @@ export function trackContact() {
 export function trackSearch(query: string) {
   trackPixelEvent('Search', { search_string: query, content_category: 'products' });
   // GAP: No CAPI call for Search — only pixel fires
-  console.log('[CAPI SDK] Search event not sent server-side');
+  console.log('[CAPI SDK Proxy] Search event not sent server-side');
 }
