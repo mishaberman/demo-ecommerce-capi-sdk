@@ -62,6 +62,8 @@ class UserData {
 class CustomData {
   private data: Record<string, unknown> = {};
 
+  setSearchString(query: string) { this.data.search_string = query; return this; }
+
   setValue(value: number) { this.data.value = value; return this; }
   setCurrency(currency: string) { this.data.currency = currency; return this; }
   setContentIds(ids: string[]) { this.data.content_ids = ids; return this; }
@@ -75,12 +77,17 @@ class CustomData {
   toJSON() { return this.data; }
 }
 
+function generateEventId() {
+  return 'event-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+}
+
 class ServerEvent {
   private data: Record<string, unknown> = {};
 
   setEventName(name: string) { this.data.event_name = name; return this; }
   setEventTime(time: number) { this.data.event_time = time; return this; }
   setEventSourceUrl(url: string) { this.data.event_source_url = url; return this; }
+  setEventId(eventId: string) { this.data.event_id = eventId; return this; }
   setActionSource(source: string) { this.data.action_source = source; return this; }
   setUserData(userData: UserData) { this.data.user_data = userData.toJSON(); return this; }
   setCustomData(customData: CustomData) { this.data.custom_data = customData.toJSON(); return this; }
@@ -151,11 +158,11 @@ export function setUserData(data: { email?: string; phone?: string; firstName?: 
 // PIXEL EVENTS — CRITICAL: No eventID option passed!
 // ============================================================
 
-function trackPixelEvent(eventName: string, params?: Record<string, unknown>) {
+function trackPixelEvent(eventName: string, params?: Record<string, unknown>, eventId?: string) {
   if (typeof window !== 'undefined' && window.fbq) {
     // CRITICAL GAP: No { eventID: ... } option — dedup impossible
-    window.fbq('track', eventName, params || {});
-    console.log(`[Meta Pixel] Tracked: ${eventName}`, params);
+    window.fbq('track', eventName, params || {}, { eventID: eventId });
+    console.log(`[Meta Pixel] Tracked: ${eventName}`, { ...params, eventID: eventId });
   }
 }
 
@@ -164,7 +171,7 @@ function trackPixelEvent(eventName: string, params?: Record<string, unknown>) {
 // Server handles hashing — frontend sends raw PII
 // ============================================================
 
-async function sendCAPIEvent(eventName: string, customData: CustomData) {
+async function sendCAPIEvent(eventName: string, customData: CustomData, eventId: string) {
   const userData = new UserData();
 
   // fbc/fbp for identity matching
@@ -186,6 +193,7 @@ async function sendCAPIEvent(eventName: string, customData: CustomData) {
     .setEventName(eventName)
     .setEventTime(Math.floor(Date.now() / 1000))
     // CRITICAL GAP: No .setEventId() — dedup impossible!
+    .setEventId(eventId)
     .setEventSourceUrl(window.location.href)
     .setActionSource('website')
     .setUserData(userData)
@@ -203,53 +211,62 @@ async function sendCAPIEvent(eventName: string, customData: CustomData) {
 // ============================================================
 
 export function trackViewContent(productId: string, productName: string, value: number, currency: string) {
-  trackPixelEvent('ViewContent', { content_ids: [productId], content_type: 'product', content_name: productName, value, currency });
+  const eventId = generateEventId();
+  trackPixelEvent('ViewContent', { content_ids: [productId], content_type: 'product', content_name: productName, value, currency }, eventId);
   const cd = new CustomData().setContentIds([productId]).setContentType('product').setContentName(productName).setValue(value).setCurrency(currency);
-  sendCAPIEvent('ViewContent', cd);
+  sendCAPIEvent('ViewContent', cd, eventId);
 }
 
 export function trackAddToCart(productId: string, productName: string, value: number, currency: string, quantity: number) {
-  trackPixelEvent('AddToCart', { content_ids: [productId], content_type: 'product', content_name: productName, value, currency, num_items: quantity });
+  const eventId = generateEventId();
+  trackPixelEvent('AddToCart', { content_ids: [productId], content_type: 'product', content_name: productName, value, currency, num_items: quantity }, eventId);
   const cd = new CustomData().setContentIds([productId]).setContentType('product').setContentName(productName).setValue(value).setCurrency(currency).setNumItems(quantity);
-  sendCAPIEvent('AddToCart', cd);
+  sendCAPIEvent('AddToCart', cd, eventId);
 }
 
 export function trackInitiateCheckout(value: number, currency: string, numItems: number, contentIds?: string[]) {
-  trackPixelEvent('InitiateCheckout', { value, currency, num_items: numItems, content_type: 'product', ...(contentIds ? { content_ids: contentIds } : {}) });
+  const eventId = generateEventId();
+  trackPixelEvent('InitiateCheckout', { value, currency, num_items: numItems, content_type: 'product', ...(contentIds ? { content_ids: contentIds } : {}) }, eventId);
   const cd = new CustomData().setValue(value).setCurrency(currency).setNumItems(numItems).setContentType('product');
   if (contentIds) cd.setContentIds(contentIds);
-  sendCAPIEvent('InitiateCheckout', cd);
+  sendCAPIEvent('InitiateCheckout', cd, eventId);
 }
 
 export function trackPurchase(value: number, currency: string, contentIds?: string[], numItems?: number) {
-  trackPixelEvent('Purchase', { value, currency, content_type: 'product', ...(contentIds ? { content_ids: contentIds } : {}), ...(numItems ? { num_items: numItems } : {}) });
+  const eventId = generateEventId();
+  trackPixelEvent('Purchase', { value, currency, content_type: 'product', ...(contentIds ? { content_ids: contentIds } : {}), ...(numItems ? { num_items: numItems } : {}) }, eventId);
   const cd = new CustomData().setValue(value).setCurrency(currency).setContentType('product');
   if (contentIds) cd.setContentIds(contentIds);
   if (numItems) cd.setNumItems(numItems);
-  sendCAPIEvent('Purchase', cd);
+  sendCAPIEvent('Purchase', cd, eventId);
 }
 
 export function trackLead(formType?: string) {
-  trackPixelEvent('Lead', { content_name: formType || 'contact_form', value: 10.00, currency: 'USD' });
+  const eventId = generateEventId();
+  trackPixelEvent('Lead', { content_name: formType || 'contact_form', value: 10.00, currency: 'USD' }, eventId);
   const cd = new CustomData().setContentName(formType || 'contact_form').setValue(10.00).setCurrency('USD');
-  sendCAPIEvent('Lead', cd);
+  sendCAPIEvent('Lead', cd, eventId);
 }
 
 export function trackCompleteRegistration(method?: string) {
-  trackPixelEvent('CompleteRegistration', { content_name: method || 'email', value: 5.00, currency: 'USD', status: true });
+  const eventId = generateEventId();
+  trackPixelEvent('CompleteRegistration', { content_name: method || 'email', value: 5.00, currency: 'USD', status: true }, eventId);
   const cd = new CustomData().setContentName(method || 'email').setValue(5.00).setCurrency('USD').setStatus(true);
-  sendCAPIEvent('CompleteRegistration', cd);
+  sendCAPIEvent('CompleteRegistration', cd, eventId);
 }
 
 export function trackContact() {
-  trackPixelEvent('Contact', { value: 15.00, currency: 'USD' });
+  const eventId = generateEventId();
+  trackPixelEvent('Contact', { value: 15.00, currency: 'USD' }, eventId);
   const cd = new CustomData().setValue(15.00).setCurrency('USD');
-  sendCAPIEvent('Contact', cd);
+  sendCAPIEvent('Contact', cd, eventId);
 }
 
 // WEAKNESS: Search event NOT sent via CAPI — pixel only
 export function trackSearch(query: string) {
-  trackPixelEvent('Search', { search_string: query, content_category: 'products' });
+  const eventId = generateEventId();
+  trackPixelEvent('Search', { search_string: query, content_category: 'products' }, eventId);
   // GAP: No CAPI call for Search — only pixel fires
-  console.log('[CAPI SDK Proxy] Search event not sent server-side');
+  const cd = new CustomData().setSearchString(query).setContentCategory('products');
+  sendCAPIEvent('Search', cd, eventId);
 }
