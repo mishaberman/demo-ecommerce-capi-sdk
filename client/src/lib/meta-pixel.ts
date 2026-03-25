@@ -35,6 +35,14 @@ const PIXEL_ID = '1684145446350033';
 // CAPI Backend Proxy URL — access token is stored server-side only
 const CAPI_PROXY_URL = 'https://meta-capi-proxy-tau.vercel.app/api/capi/event';
 
+/** Read test_event_code from URL param (e.g. ?test_event_code=TEST12345) */
+function getTestEventCode(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('test_event_code');
+  } catch { return null; }
+}
+
 // ============================================================
 // Business SDK-style Classes (sent to server-side proxy)
 // These mirror the facebook-nodejs-business-sdk API surface
@@ -108,8 +116,13 @@ class EventRequest {
     // Send each event to the server-side proxy
     // The proxy wraps it in the Graph API format with access_token
     for (const event of this.events) {
-      const payload = event.toJSON();
-      console.log(`[CAPI SDK Proxy] Sending ${payload.event_name || 'event'} — payload:`, JSON.parse(JSON.stringify(payload)));
+      const payload = event.toJSON() as Record<string, unknown>;
+      // Include test_event_code if present in URL params
+      const testEventCode = getTestEventCode();
+      if (testEventCode) {
+        payload.test_event_code = testEventCode;
+      }
+      console.log(`[CAPI SDK Proxy] Sending ${payload.event_name || 'event'}${testEventCode ? ` [TEST: ${testEventCode}]` : ''} — payload:`, JSON.parse(JSON.stringify(payload)));
       try {
         const response = await fetch(CAPI_PROXY_URL, {
           method: 'POST',
