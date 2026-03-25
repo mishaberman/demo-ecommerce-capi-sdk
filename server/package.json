@@ -1,0 +1,16 @@
+{
+  "name": "demo-ecommerce-capi-sdk-server",
+  "version": "1.0.0",
+  "description": "Server-side CAPI proxy using Business SDK-style classes (EventRequest, ServerEvent, UserData, CustomData). Has intentional gaps: no deduplication, no LDU, no phone normalization.",
+  "main": "capi-proxy.js",
+  "scripts": {
+    "start": "node capi-proxy.js",
+    "dev": "node --watch capi-proxy.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
