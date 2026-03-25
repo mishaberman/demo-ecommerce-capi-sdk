@@ -109,6 +109,7 @@ class EventRequest {
     // The proxy wraps it in the Graph API format with access_token
     for (const event of this.events) {
       const payload = event.toJSON();
+      console.log(`[CAPI SDK Proxy] Sending ${payload.event_name || 'event'} — payload:`, JSON.parse(JSON.stringify(payload)));
       try {
         const response = await fetch(CAPI_PROXY_URL, {
           method: 'POST',
@@ -116,7 +117,7 @@ class EventRequest {
           body: JSON.stringify(payload),
         });
         const result = await response.json();
-        console.log(`[CAPI SDK Proxy] EventRequest response:`, result);
+        console.log(`[CAPI SDK Proxy] ${payload.event_name || 'event'} — response:`, result);
         return result;
       } catch (err) {
         console.error(`[CAPI SDK Proxy] EventRequest failed:`, err);
