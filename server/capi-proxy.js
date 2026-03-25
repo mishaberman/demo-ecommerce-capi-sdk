@@ -73,7 +73,11 @@ class UserData {
   toPayload() {
     const payload = {};
     if (this.em) payload.em = UserData._hash(this.em);
-    if (this.ph) payload.ph = UserData._hash(this.ph); // GAP: no phone normalization
+    if (this.ph) {
+      // Normalize phone: strip non-digits before hashing
+      const normalizedPhone = this.ph.replace(/\D/g, "");
+      payload.ph = UserData._hash(normalizedPhone);
+    }
     if (this.fn) payload.fn = UserData._hash(this.fn);
     if (this.ln) payload.ln = UserData._hash(this.ln);
     if (this.external_id) payload.external_id = UserData._hash(this.external_id);
@@ -123,7 +127,10 @@ class ServerEvent {
     this.event_source_url = data.event_source_url || "";
     this.user_data = data.user_data ? new UserData(data.user_data) : new UserData();
     this.custom_data = data.custom_data ? new CustomData(data.custom_data) : null;
-    // GAP: No event_id support — deduplication is not implemented
+    this.event_id = data.event_id || ""; // For pixel/CAPI deduplication
+    this.data_processing_options = data.data_processing_options;
+    this.data_processing_options_country = data.data_processing_options_country;
+    this.data_processing_options_state = data.data_processing_options_state;
   }
 
   toPayload() {
@@ -137,7 +144,16 @@ class ServerEvent {
     if (this.custom_data) {
       payload.custom_data = this.custom_data.toPayload();
     }
-    // GAP: No data_processing_options
+    // Event deduplication
+    if (this.event_id) {
+      payload.event_id = this.event_id;
+    }
+    // Data processing options (LDU / CCPA / GDPR compliance)
+    if (this.data_processing_options) {
+      payload.data_processing_options = this.data_processing_options;
+      payload.data_processing_options_country = this.data_processing_options_country || 0;
+      payload.data_processing_options_state = this.data_processing_options_state || 0;
+    }
     return payload;
   }
 }
@@ -207,10 +223,14 @@ app.post("/api/capi/event", async (req, res) => {
     const serverEvent = new ServerEvent({
       event_name: body.event_name,
       event_time: body.event_time,
+      event_id: body.event_id, // For pixel/CAPI deduplication
       action_source: body.action_source,
       event_source_url: body.event_source_url || req.headers.referer || "",
       user_data: userData,
       custom_data: body.custom_data,
+      data_processing_options: body.data_processing_options,
+      data_processing_options_country: body.data_processing_options_country,
+      data_processing_options_state: body.data_processing_options_state,
     });
 
     // Create and execute the event request
